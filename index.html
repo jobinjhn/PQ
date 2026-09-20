@@ -36,10 +36,10 @@
   #video {
     position: absolute;
     /* EDIT THESE 4 NUMBERS TO TWEAK THE CAMERA POSITION */
-    top: 12%; 
+    top: 18%; 
     left: 10%; 
     width: 80%; 
-    height: 60%; 
+    height: 54%; 
     /* ------------------------------------------------ */
     object-fit: cover;
     z-index: 2;
@@ -159,9 +159,9 @@ function capturePhoto() {
 
   // 2. Define the bounding box for the video (Must match the CSS percentages exactly)
   const vx = w * 0.10;  // left: 10%
-  const vy = h * 0.12;  // top: 12%
+  const vy = h * 0.18;  // top: 18%
   const vw = w * 0.80;  // width: 80%
-  const vh = h * 0.60;  // height: 60%
+  const vh = h * 0.54;  // height: 54%
 
   // 3. Calculate cropping to mimic "object-fit: cover"
   const videoRatio = video.videoWidth / video.videoHeight;
