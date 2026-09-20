@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#2b1d15" />
+<title>Pretty Queen Photo Booth</title>
+<style>
+  :root { --accent:#c49a6c; --bg:#2b1d15; --card:#3d2b20; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:white; font-family:Arial,Helvetica,sans-serif;
+    min-height:100vh; display:flex; justify-content:center;
+  }
+  .app { width:min(100%,520px); padding:14px; }
+  h1 { font-size:22px; margin:4px 0 4px; text-align: center; }
+  .sub { color:#ccc; font-size:13px; margin-bottom:14px; text-align: center; }
+  
+  /* The Booth Container */
+  .booth {
+    position:relative; width:100%; overflow:hidden;
+    border-radius:20px; box-shadow:0 10px 35px rgba(0,0,0,.45);
+    background: #000;
+  }
+  
+  /* The Template Image */
+  #templateUI {
+    width: 100%;
+    display: block;
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* The Live Video Feed (Positioned directly over the white box) */
+  #video {
+    position: absolute;
+    /* EDIT THESE 4 NUMBERS TO TWEAK THE CAMERA POSITION */
+    top: 12%; 
+    left: 10%; 
+    width: 80%; 
+    height: 60%; 
+    /* ------------------------------------------------ */
+    object-fit: cover;
+    z-index: 2;
+    transform: scaleX(-1); /* Mirrors the camera */
+    border-radius: 4px;
+  }
+
+  /* The Final Captured Image Canvas */
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 3;
+    object-fit: contain;
+  }
+
+  .controls { margin-top:12px; display:flex; gap:10px; }
+  button {
+    flex:1; border:0; border-radius:14px; padding:14px 12px; font-weight:700;
+    background:white; color:#111; font-size:15px; cursor: pointer;
+  }
+  button.secondary { background:var(--card); color:#fff; }
+  button.capture { background:var(--accent); }
+  button:disabled { opacity:.45; cursor: not-allowed; }
+  
+  .status {
+    margin:12px 0 0; padding:11px 12px; border-radius:12px; background:var(--card);
+    font-size:12px; color:#cfcfcf; line-height:1.4; text-align: center;
+  }
+  .hidden { display:none !important; }
+  .shareRow { display:flex; gap:10px; margin-top:10px; }
+  .shareRow button { min-width:0; }
+</style>
+</head>
+<body>
+<main class="app">
+  <h1>Pretty Queen Salon</h1>
+  <div class="sub">Pose for your new look!</div>
+
+  <section class="booth">
+    <!-- Template background -->
+    <img id="templateUI" src="e.png" alt="Photo Booth Frame" />
+    
+    <!-- Live Camera -->
+    <video id="video" autoplay playsinline muted class="hidden"></video>
+    
+    <!-- Final Captured Photo -->
+    <canvas id="canvas" class="preview hidden"></canvas>
+  </section>
+
+  <div class="controls">
+    <button id="startBtn">Open Camera</button>
+    <button id="captureBtn" class="capture" disabled>Capture</button>
+  </div>
+
+  <div id="shareControls" class="shareRow hidden">
+    <button id="shareBtn">Save & Share</button>
+    <button id="retakeBtn" class="secondary">Retake</button>
+  </div>
+
+  <div id="status" class="status">
+    Click "Open Camera" to begin.
+  </div>
+</main>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const captureBtn = document.getElementById('captureBtn');
+const shareControls = document.getElementById('shareControls');
+const shareBtn = document.getElementById('shareBtn');
+const retakeBtn = document.getElementById('retakeBtn');
+const status = document.getElementById('status');
+const templateUI = document.getElementById('templateUI');
+
+let stream = null;
+let capturedBlob = null;
+
+function setStatus(msg) { status.textContent = msg; }
+
+async function openCamera() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus('Camera access is unavailable. Please use a modern browser.');
+      return;
+    }
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1080 }, height: { ideal: 1440 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    video.classList.remove('hidden');
+    canvas.classList.add('hidden');
+    templateUI.classList.remove('hidden');
+    captureBtn.disabled = false;
+    shareControls.classList.add('hidden');
+    setStatus('Camera ready. Position yourself inside the frame and tap Capture.');
+  } catch (err) {
+    setStatus('Camera permission was not granted. Please allow camera access and try again.');
+  }
+}
+
+function capturePhoto() {
+  if (!video.videoWidth) return;
+
+  // Get the original high-res dimensions of the e.png template
+  const w = templateUI.naturalWidth;
+  const h = templateUI.naturalHeight;
+  
+  canvas.width = w;
+  canvas.height = h;
+
+  // 1. Draw the template as the base layer
+  ctx.drawImage(templateUI, 0, 0, w, h);
+
+  // 2. Define the bounding box for the video (Must match the CSS percentages exactly)
+  const vx = w * 0.10;  // left: 10%
+  const vy = h * 0.12;  // top: 12%
+  const vw = w * 0.80;  // width: 80%
+  const vh = h * 0.60;  // height: 60%
+
+  // 3. Calculate cropping to mimic "object-fit: cover"
+  const videoRatio = video.videoWidth / video.videoHeight;
+  const boxRatio = vw / vh;
+  let sx, sy, sWidth, sHeight;
+
+  if (videoRatio > boxRatio) {
+    sHeight = video.videoHeight;
+    sWidth = sHeight * boxRatio;
+    sx = (video.videoWidth - sWidth) / 2;
+    sy = 0;
+  } else {
+    sWidth = video.videoWidth;
+    sHeight = sWidth / boxRatio;
+    sx = 0;
+    sy = (video.videoHeight - sHeight) / 2;
+  }
+
+  // 4. Draw the cropped, mirrored video onto the white square
+  ctx.save();
+  ctx.translate(vx + vw, vy); // Move to top-right of the video box
+  ctx.scale(-1, 1);           // Flip horizontally
+  ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, vw, vh); // Draw video
+  ctx.restore();
+
+  // Update UI
+  video.classList.add('hidden');
+  canvas.classList.remove('hidden');
+  shareControls.classList.remove('hidden');
+  setStatus('Photo captured! Tap Save & Share to keep your memory.');
+  
+  canvas.toBlob(blob => { capturedBlob = blob; }, 'image/jpeg', 0.95);
+}
+
+async function sharePhoto() {
+  if (!capturedBlob) return;
+  const file = new File([capturedBlob], 'pretty-queen-booth.jpg', { type: 'image/jpeg' });
+
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: 'Pretty Queen Salon',
+        text: 'Check out my new look at Pretty Queen Salon!'
+      });
+      return;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+  }
+
+  const url = URL.createObjectURL(capturedBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pretty-queen-booth.jpg';
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus('Your photo has been saved to your device!');
+}
+
+function retake() {
+  canvas.classList.add('hidden');
+  video.classList.remove('hidden');
+  shareControls.classList.add('hidden');
+  capturedBlob = null;
+  setStatus('Ready for another photo.');
+}
+
+startBtn.addEventListener('click', openCamera);
+captureBtn.addEventListener('click', capturePhoto);
+shareBtn.addEventListener('click', sharePhoto);
+retakeBtn.addEventListener('click', retake);
+
+window.addEventListener('pagehide', () => {
+  stream?.getTracks().forEach(t => t.stop());
+});
+</script>
+</body>
+</html>
